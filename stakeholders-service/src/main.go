@@ -1,43 +1,79 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
+	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"time"
 
-	"stakeholders-service/model"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+
+	"stakeholders-service/handler"
+	"stakeholders-service/repository"
 
 	"github.com/gorilla/mux"
 )
 
-func test(resp http.ResponseWriter, req *http.Request) {
-	user := model.User{
-		Username: "kita",
-		Name:     "Ivan",
-		Surname:  "Novakovic",
+func initDB(ctx context.Context) *mongo.Client {
+	uri := os.Getenv("MONGO_URI")
+	if uri == "" {
+		uri = "mongodb://localhost:27017"
+	}
+	clientOpts := options.Client().ApplyURI(uri)
+
+	client, err := mongo.Connect(ctx, clientOpts)
+	if err != nil {
+		log.Fatal("mongo connect:", err)
+	}
+	if err := client.Ping(ctx, nil); err != nil {
+		log.Fatal("mongo ping:", err)
 	}
 
-	json.NewEncoder(resp).Encode(user)
-}
-
-func handleReq(resp http.ResponseWriter, req *http.Request) {
-	fmt.Println(req.Header)
-	resp.Write([]byte("test"))
-}
-
-func handlePathReq(resp http.ResponseWriter, req *http.Request) {
-	path := mux.Vars(req)["path"]
-	resp.Write([]byte(path))
+	return client
 }
 
 func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
+	client := initDB(ctx)
+	dbName := os.Getenv("DB_NAME")
+	if dbName == "" {
+		dbName = "stakeholders"
+	}
+
+	repo := repository.NewUserRepository(client.Database(dbName))
 	router := mux.NewRouter()
+	handler.RegisterRoutes(router, repo)
 
-	router.HandleFunc("/", handleReq)
-	router.HandleFunc("/user", test)
-	router.HandleFunc("/{path}", handlePathReq).Methods("GET")
+	srv := &http.Server{
+		Handler: router,
+		Addr: ":" + func() string {
+			if p := os.Getenv("PORT"); p != "" {
+				return p
+			}
+			return "8080"
+		}(),
+		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  15 * time.Second,
+	}
 
-	log.Fatal(http.ListenAndServe(":8080", router))
+	go func() {
+		log.Println("server started on " + srv.Addr)
+		if err := srv.ListenAndServe(); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt)
+	<-stop
+	log.Println("shutting down server...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	srv.Shutdown(shutdownCtx)
+	client.Disconnect(shutdownCtx)
 }
