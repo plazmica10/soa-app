@@ -68,3 +68,9 @@ func (r *BlogRepository) ensureIndexes(ctx context.Context) error {
     _, err := r.coll.Indexes().CreateMany(ctx, models)
     return err
 }
+
+// UpdateLikesCount increments/decrements likes_count by delta (use +1 or -1)
+func (r *BlogRepository) UpdateLikesCount(ctx context.Context, id primitive.ObjectID, delta int) error {
+    _, err := r.coll.UpdateByID(ctx, id, bson.M{"$inc": bson.M{"likes_count": delta}})
+    return err
+}

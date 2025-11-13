@@ -1,0 +1,22 @@
+meta {
+  name: Like
+  type: http
+  seq: 6
+}
+
+post {
+  url: http://localhost:8081/blogs/6914d22df76ad629320125fb/likes
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "user_id" : "651234abcdef1234567890ab"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

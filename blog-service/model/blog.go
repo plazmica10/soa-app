@@ -13,4 +13,5 @@ type Blog struct {
     Description string    `json:"description"`
     CreatedAt   time.Time `json:"created_at"`
     Images      []string  `json:"images,omitempty"`
+    LikesCount  int       `bson:"likes_count,omitempty" json:"likes_count,omitempty"`
 }
