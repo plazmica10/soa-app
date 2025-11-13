@@ -1,0 +1,23 @@
+meta {
+  name: Blogs - Get
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://localhost:8081/blogs
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "title": "My Second Blog Post",
+    "description": "wassup"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

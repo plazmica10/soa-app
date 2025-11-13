@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+	"log"
 
 	"github.com/gorilla/mux"
 
@@ -35,10 +36,11 @@ func (h *blogHandler) createBlog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.CreatedAt = time.Now().UTC()
-	if err := h.repo.Create(r.Context(), &in); err != nil {
-		http.Error(w, "failed to create blog", http.StatusInternalServerError)
-		return
-	}
+    if err := h.repo.Create(r.Context(), &in); err != nil {
+        log.Printf("create blog error: %v", err)
+        http.Error(w, "failed to create blog: "+err.Error(), http.StatusInternalServerError)
+        return
+    }
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(in)

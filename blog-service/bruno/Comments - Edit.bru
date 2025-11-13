@@ -1,0 +1,22 @@
+meta {
+  name: Comments - Edit
+  type: http
+  seq: 5
+}
+
+patch {
+  url: http://localhost:8081/blogs/6914d22df76ad629320125fb/comments/6915db82d90c0fc9b8c587f0
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "text" : "izmenjen"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -46,6 +46,7 @@ func main() {
 	}
 
 	repo := repository.NewBlogRepository(client.Database(dbName))
+	commentRepo := repository.NewCommentRepository(client.Database(dbName))
 	router := mux.NewRouter()
 
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +55,7 @@ func main() {
 	}).Methods("GET")
 
 	handler.RegisterRoutes(router, repo)
+	handler.RegisterCommentRoutes(router, commentRepo, repo)
 
 	srv := &http.Server{
 		Handler: router,

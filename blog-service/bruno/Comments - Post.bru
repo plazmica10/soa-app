@@ -1,0 +1,24 @@
+meta {
+  name: Comments - Post
+  type: http
+  seq: 5
+}
+
+post {
+  url: http://localhost:8081/blogs/6914d22df76ad629320125fb/comments
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+  "author_id": "651234abcdef1234567890ab",
+  "author_name": "Ivan Novakovic Smrad",
+  "text": "Great post — thanks for sharing! I found the markdown example very helpful."
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -6,10 +6,9 @@ import (
     "time"
 
     "blog-service/model"
-
     "go.mongodb.org/mongo-driver/bson"
+    "go.mongodb.org/mongo-driver/bson/primitive"
     "go.mongodb.org/mongo-driver/mongo"
-    "go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type BlogRepository struct {
@@ -53,13 +52,17 @@ func (r *BlogRepository) GetAll(ctx context.Context) ([]model.Blog, error) {
 
 func (r *BlogRepository) GetByID(ctx context.Context, id string) (*model.Blog, error) {
     var b model.Blog
-    err := r.coll.FindOne(ctx, bson.M{"id": id}).Decode(&b)
+    oid, err := primitive.ObjectIDFromHex(id)
+    if err != nil {
+        return nil, err
+    }
+    err = r.coll.FindOne(ctx, bson.M{"_id": oid}).Decode(&b)
     return &b, err
 }
 
 func (r *BlogRepository) ensureIndexes(ctx context.Context) error {
+    // Keep a descending index on created_at for listing/recent queries.
     models := []mongo.IndexModel{
-        {Keys: bson.D{{Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)},
         {Keys: bson.D{{Key: "created_at", Value: -1}}},
     }
     _, err := r.coll.Indexes().CreateMany(ctx, models)
