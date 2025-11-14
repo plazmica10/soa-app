@@ -7,6 +7,7 @@ import (
     "github.com/gorilla/mux"
     "go.mongodb.org/mongo-driver/bson/primitive"
 
+    "blog-service/auth"
     "blog-service/model"
     "blog-service/repository"
 )
@@ -17,14 +18,19 @@ type commentHandler struct {
 }
 
 // RegisterCommentRoutes registers comment endpoints
-func RegisterCommentRoutes(r *mux.Router, cr *repository.CommentRepository, br *repository.BlogRepository) {
+func RegisterCommentRoutes(public *mux.Router, authRouter *mux.Router, cr *repository.CommentRepository, br *repository.BlogRepository) {
     h := &commentHandler{repo: cr, blogRepo: br}
-    r.HandleFunc("/blogs/{id}/comments", h.createComment).Methods("POST")
-    r.HandleFunc("/blogs/{id}/comments", h.listComments).Methods("GET")
-    r.HandleFunc("/blogs/{id}/comments/{cid}", h.updateComment).Methods("PATCH")
+    // public
+    public.HandleFunc("/blogs/{id}/comments", h.listComments).Methods("GET")
+    // protected
+    if authRouter != nil {
+        authRouter.HandleFunc("/blogs/{id}/comments", h.createComment).Methods("POST")
+        authRouter.HandleFunc("/blogs/{id}/comments/{cid}", h.updateComment).Methods("PATCH")
+    }
 }
 
 type createCommentReq struct {
+    // AuthorID may be omitted when the request is authenticated; we'll use JWT user id.
     AuthorID   string `json:"author_id,omitempty"`
     AuthorName string `json:"author_name"`
     Text       string `json:"text"`
@@ -58,10 +64,21 @@ func (h *commentHandler) createComment(w http.ResponseWriter, r *http.Request) {
         return
     }
     var authorOID primitive.ObjectID
-    if in.AuthorID != "" {
-        a, err := primitive.ObjectIDFromHex(in.AuthorID)
-        if err == nil {
-            authorOID = a
+    // prefer authenticated user id over provided author_id
+    if a := auth.GetAuth(r); a != nil && a.UserID != "" {
+        if au, err := primitive.ObjectIDFromHex(a.UserID); err == nil {
+            authorOID = au
+        }
+        // use username from token if author_name not provided
+        if in.AuthorName == "" {
+            in.AuthorName = a.Username
+        }
+    } else {
+        if in.AuthorID != "" {
+            a, err := primitive.ObjectIDFromHex(in.AuthorID)
+            if err == nil {
+                authorOID = a
+            }
         }
     }
     c := model.Comment{

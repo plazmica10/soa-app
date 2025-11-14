@@ -7,13 +7,17 @@ meta {
 post {
   url: http://localhost:8081/blogs
   body: json
-  auth: inherit
+  auth: bearer
+}
+
+auth:bearer {
+  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiI2OTE3NTM3ZmUwYTBlMjVjMjY4OGEyYzkiLCJ1c2VybmFtZSI6Im9nbmplbiIsInJvbGVzIjpbInVzZXIiXSwiYXVkIjpbIiJdLCJleHAiOjE3NjMxMzk5OTIsIm5iZiI6MTc2MzEzNjM5MiwiaWF0IjoxNzYzMTM2MzkyfQ.sfGaDTUYQIpKbC7Sjeak2Wmb1DLUzfy9Iu-hOtZAvT4
 }
 
 body:json {
   {
-    "title": "testic",
-    "description": "test deskriptic",
+    "title": "blokce",
+    "description": "novi blogic",
     "images": [
       "https://ivansmrdi.com/kitomber.img"
     ]

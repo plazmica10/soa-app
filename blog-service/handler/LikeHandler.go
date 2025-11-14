@@ -8,6 +8,7 @@ import (
     "github.com/gorilla/mux"
     "go.mongodb.org/mongo-driver/bson/primitive"
 
+    "blog-service/auth"
     "blog-service/model"
     "blog-service/repository"
 )
@@ -20,11 +21,15 @@ type likeHandler struct {
 // RegisterLikeRoutes registers like endpoints
 func RegisterLikeRoutes(r *mux.Router, lr *repository.LikeRepository, br *repository.BlogRepository) {
     h := &likeHandler{repo: lr, blogRepo: br}
-    r.HandleFunc("/blogs/{id}/likes", h.createLike).Methods("POST")
-    r.HandleFunc("/blogs/{id}/likes", h.deleteLike).Methods("DELETE")
+    // likes are mutating operations; require auth
+    if r != nil {
+        r.HandleFunc("/blogs/{id}/likes", h.createLike).Methods("POST")
+        r.HandleFunc("/blogs/{id}/likes", h.deleteLike).Methods("DELETE")
+    }
 }
 
 type likeReq struct {
+    // user_id is optional when the request contains a valid JWT; middleware will provide it
     UserID string `json:"user_id"`
 }
 
@@ -40,18 +45,30 @@ func (h *likeHandler) createLike(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "invalid body", http.StatusBadRequest)
         return
     }
-    if in.UserID == "" {
-        http.Error(w, "user_id required", http.StatusBadRequest)
-        return
+    // resolve user from JWT if present
+    var userOID primitive.ObjectID
+    if a := auth.GetAuth(r); a != nil && a.UserID != "" {
+        u, err := primitive.ObjectIDFromHex(a.UserID)
+        if err != nil {
+            http.Error(w, "invalid user id in token", http.StatusBadRequest)
+            return
+        }
+        userOID = u
+    } else {
+        if in.UserID == "" {
+            http.Error(w, "user_id required", http.StatusBadRequest)
+            return
+        }
+        u, err := primitive.ObjectIDFromHex(in.UserID)
+        if err != nil {
+            http.Error(w, "invalid user id", http.StatusBadRequest)
+            return
+        }
+        userOID = u
     }
     blogOID, err := primitive.ObjectIDFromHex(id)
     if err != nil {
         http.Error(w, "invalid blog id", http.StatusBadRequest)
-        return
-    }
-    userOID, err := primitive.ObjectIDFromHex(in.UserID)
-    if err != nil {
-        http.Error(w, "invalid user id", http.StatusBadRequest)
         return
     }
     // ensure blog exists
@@ -89,18 +106,30 @@ func (h *likeHandler) deleteLike(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "invalid body", http.StatusBadRequest)
         return
     }
-    if in.UserID == "" {
-        http.Error(w, "user_id required", http.StatusBadRequest)
-        return
+    // resolve user from JWT if present
+    var userOID primitive.ObjectID
+    if a := auth.GetAuth(r); a != nil && a.UserID != "" {
+        u, err := primitive.ObjectIDFromHex(a.UserID)
+        if err != nil {
+            http.Error(w, "invalid user id in token", http.StatusBadRequest)
+            return
+        }
+        userOID = u
+    } else {
+        if in.UserID == "" {
+            http.Error(w, "user_id required", http.StatusBadRequest)
+            return
+        }
+        u, err := primitive.ObjectIDFromHex(in.UserID)
+        if err != nil {
+            http.Error(w, "invalid user id", http.StatusBadRequest)
+            return
+        }
+        userOID = u
     }
     blogOID, err := primitive.ObjectIDFromHex(id)
     if err != nil {
         http.Error(w, "invalid blog id", http.StatusBadRequest)
-        return
-    }
-    userOID, err := primitive.ObjectIDFromHex(in.UserID)
-    if err != nil {
-        http.Error(w, "invalid user id", http.StatusBadRequest)
         return
     }
     // delete like

@@ -13,6 +13,7 @@ import (
 
 	"blog-service/handler"
 	"blog-service/repository"
+	"blog-service/auth"
 	
 	"github.com/gorilla/mux"
 )
@@ -49,15 +50,19 @@ func main() {
 	commentRepo := repository.NewCommentRepository(client.Database(dbName))
 	likeRepo := repository.NewLikeRepository(client.Database(dbName))
 	router := mux.NewRouter()
+	// create an auth-protected subrouter
+	authSub := router.PathPrefix("").Subrouter()
+	authSub.Use(func(next http.Handler) http.Handler { return auth.JWTAuthMiddleware(next) })
 
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}).Methods("GET")
 
-	handler.RegisterRoutes(router, repo)
-	handler.RegisterCommentRoutes(router, commentRepo, repo)
-	handler.RegisterLikeRoutes(router, likeRepo, repo)
+	// public vs protected route registration
+	handler.RegisterRoutes(router, authSub, repo)
+	handler.RegisterCommentRoutes(router, authSub, commentRepo, repo)
+	handler.RegisterLikeRoutes(authSub, likeRepo, repo)
 
 	srv := &http.Server{
 		Handler: router,

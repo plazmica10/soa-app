@@ -8,6 +8,7 @@ import (
 
 	"github.com/gorilla/mux"
 
+	"blog-service/auth"
 	"blog-service/model"
 	"blog-service/repository"
 )
@@ -16,12 +17,17 @@ type blogHandler struct {
 	repo *repository.BlogRepository
 }
 
-// RegisterRoutes registers blog routes on the given router
-func RegisterRoutes(r *mux.Router, repo *repository.BlogRepository) {
+// RegisterRoutes registers blog routes. Public routes go on 'public',
+// protected routes (requiring auth) go on 'authRouter'.
+func RegisterRoutes(public *mux.Router, authRouter *mux.Router, repo *repository.BlogRepository) {
 	h := &blogHandler{repo: repo}
-	r.HandleFunc("/blogs", h.createBlog).Methods("POST")
-	r.HandleFunc("/blogs", h.listBlogs).Methods("GET")
-	r.HandleFunc("/blogs/{id}", h.getBlog).Methods("GET")
+	// public
+	public.HandleFunc("/blogs", h.listBlogs).Methods("GET")
+	public.HandleFunc("/blogs/{id}", h.getBlog).Methods("GET")
+	// protected
+	if authRouter != nil {
+		authRouter.HandleFunc("/blogs", h.createBlog).Methods("POST")
+	}
 }
 
 func (h *blogHandler) createBlog(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +42,16 @@ func (h *blogHandler) createBlog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.CreatedAt = time.Now().UTC()
+	// attach author info from JWT if available
+	if a := auth.GetAuth(r); a != nil {
+		// try to set AuthorID and AuthorName when posting a blog
+		if a.UserID != "" {
+			in.AuthorID = a.UserID
+		}
+		if in.AuthorName == "" {
+			in.AuthorName = a.Username
+		}
+	}
     if err := h.repo.Create(r.Context(), &in); err != nil {
         log.Printf("create blog error: %v", err)
         http.Error(w, "failed to create blog: "+err.Error(), http.StatusInternalServerError)
