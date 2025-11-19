@@ -65,6 +65,20 @@ services:
       - "8082:8082"
     restart: unless-stopped
 
+  tour-service:
+    build:
+      context: ./tour-service
+      dockerfile: Dockerfile
+    container_name: tour-service
+    depends_on:
+      - mongo
+    environment:
+      - MONGO_URI=mongodb://mongo:27017
+      - MONGO_DB=tours
+    ports:
+      - "8083:8083"
+    restart: unless-stopped
+
 
 
 
