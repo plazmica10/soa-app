@@ -5,11 +5,12 @@ meta {
 }
 
 post {
-  url: http://localhost:8082/follow
-  body: none
+  url: http://localhost:8080/follow
+  body: json
   auth: inherit
 }
 
 settings {
   encodeUrl: true
+  timeout: 0
 }
