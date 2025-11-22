@@ -1,0 +1,51 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'soa-microservices'
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Node Exporter - Host metrics
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          instance: 'host-machine'
+
+  # cAdvisor - Container metrics
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+        labels:
+          instance: 'docker-containers'
+
+  # Microservices
+  - job_name: 'stakeholders-service'
+    static_configs:
+      - targets: ['stakeholders-service:8080']
+    metrics_path: '/metrics'
+
+  - job_name: 'blog-service'
+    static_configs:
+      - targets: ['blog-service:8081']
+    metrics_path: '/metrics'
+
+  - job_name: 'follower-service'
+    static_configs:
+      - targets: ['follower-service:8082']
+    metrics_path: '/metrics'
+
+  - job_name: 'tour-service'
+    static_configs:
+      - targets: ['tour-service:8083']
+    metrics_path: '/metrics'
+
+  - job_name: 'gateway'
+    static_configs:
+      - targets: ['gateway:8080']
+    metrics_path: '/metrics'

@@ -3,22 +3,86 @@ package main
 import (
     "context"
     "encoding/json"
-    "log"
     "net/http"
     "net/http/httputil"
     "net/url"
+    "os"
+    "os/signal"
     "strings"
     "time"
 
     pb "github.com/IvanNovakovic/SOA_Proj/protos"
     "google.golang.org/grpc"
     "google.golang.org/grpc/credentials/insecure"
+    
+    "github.com/gorilla/mux"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
+    "github.com/sirupsen/logrus"
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/exporters/jaeger"
+    "go.opentelemetry.io/otel/sdk/resource"
+    "go.opentelemetry.io/otel/sdk/trace"
+    semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
+    "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+    "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 )
+
+var logger = logrus.New()
+
+func initLogger() {
+    logger.SetFormatter(&logrus.JSONFormatter{})
+    logger.SetOutput(os.Stdout)
+    logger.SetLevel(logrus.InfoLevel)
+}
+
+func initTracer() func(context.Context) error {
+    endpoint := os.Getenv("OTEL_EXPORTER_JAEGER_ENDPOINT")
+    if endpoint == "" {
+        endpoint = "http://localhost:14268/api/traces"
+    }
+
+    logger.WithFields(logrus.Fields{
+        "service":  "gateway-service",
+        "action":   "tracer_init",
+        "endpoint": endpoint,
+    }).Info("Initializing Jaeger tracer")
+
+    exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(endpoint)))
+    if err != nil {
+        logger.WithFields(logrus.Fields{
+            "service": "gateway-service",
+            "action":  "tracer_init",
+            "error":   err.Error(),
+        }).Fatal("Failed to create Jaeger exporter")
+    }
+
+    tp := trace.NewTracerProvider(
+        trace.WithBatcher(exp),
+        trace.WithResource(resource.NewWithAttributes(
+            semconv.SchemaURL,
+            semconv.ServiceNameKey.String("gateway-service"),
+            semconv.ServiceVersionKey.String("1.0.0"),
+        )),
+    )
+    otel.SetTracerProvider(tp)
+
+    logger.WithFields(logrus.Fields{
+        "service": "gateway-service",
+        "action":  "tracer_init",
+    }).Info("Jaeger tracer initialized successfully")
+
+    return tp.Shutdown
+}
 
 func newProxy(target string) *httputil.ReverseProxy {
     u, err := url.Parse(target)
     if err != nil {
-        log.Fatalf("invalid proxy target %s: %v", target, err)
+        logger.WithFields(logrus.Fields{
+            "service": "gateway-service",
+            "action":  "proxy_init",
+            "target":  target,
+            "error":   err.Error(),
+        }).Fatalf("Invalid proxy target")
     }
     proxy := httputil.NewSingleHostReverseProxy(u)
     // tweak the director to preserve original host header if needed
@@ -33,7 +97,12 @@ func newProxy(target string) *httputil.ReverseProxy {
         return nil
     }
     proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, err error) {
-        log.Printf("proxy error for %s -> %v", req.URL.Path, err)
+        logger.WithFields(logrus.Fields{
+            "service": "gateway-service",
+            "action":  "proxy_error",
+            "path":    req.URL.Path,
+            "error":   err.Error(),
+        }).Error("Proxy error")
         http.Error(rw, "Bad Gateway", http.StatusBadGateway)
     }
     return proxy
@@ -48,20 +117,46 @@ type grpcClients struct {
 }
 
 func initGRPCClients() (*grpcClients, error) {
-    // Connect to stakeholder service
+    logger.WithFields(logrus.Fields{
+        "service": "gateway-service",
+        "action":  "grpc_client_init",
+    }).Info("Initializing gRPC clients")
+
+    // Connect to stakeholder service with OpenTelemetry interceptors
     stakeholderConn, err := grpc.Dial("stakeholders-service:9090", 
-        grpc.WithTransportCredentials(insecure.NewCredentials()))
+        grpc.WithTransportCredentials(insecure.NewCredentials()),
+        grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor()),
+        grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor()))
     if err != nil {
+        logger.WithFields(logrus.Fields{
+            "service": "gateway-service",
+            "action":  "grpc_client_init",
+            "target":  "stakeholders-service",
+            "error":   err.Error(),
+        }).Error("Failed to connect to stakeholders service")
         return nil, err
     }
 
-    // Connect to follower service
+    // Connect to follower service with OpenTelemetry interceptors
     followerConn, err := grpc.Dial("follower-service:9092", 
-        grpc.WithTransportCredentials(insecure.NewCredentials()))
+        grpc.WithTransportCredentials(insecure.NewCredentials()),
+        grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor()),
+        grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor()))
     if err != nil {
+        logger.WithFields(logrus.Fields{
+            "service": "gateway-service",
+            "action":  "grpc_client_init",
+            "target":  "follower-service",
+            "error":   err.Error(),
+        }).Error("Failed to connect to follower service")
         stakeholderConn.Close()
         return nil, err
     }
+
+    logger.WithFields(logrus.Fields{
+        "service": "gateway-service",
+        "action":  "grpc_client_init",
+    }).Info("gRPC clients initialized successfully")
 
     return &grpcClients{
         stakeholderConn: stakeholderConn,
@@ -81,10 +176,25 @@ func (gc *grpcClients) Close() {
 }
 
 func main() {
+    initLogger()
+    
+    logger.WithFields(logrus.Fields{
+        "service": "gateway-service",
+        "action":  "startup",
+    }).Info("Starting gateway-service")
+
+    // Initialize tracer
+    cleanup := initTracer()
+    defer cleanup(context.Background())
+
     // Initialize gRPC clients
     grpcClients, err := initGRPCClients()
     if err != nil {
-        log.Fatalf("failed to init gRPC clients: %v", err)
+        logger.WithFields(logrus.Fields{
+            "service": "gateway-service",
+            "action":  "grpc_client_init",
+            "error":   err.Error(),
+        }).Fatalf("Failed to initialize gRPC clients")
     }
     defer grpcClients.Close()
 
@@ -148,7 +258,11 @@ func main() {
             Password: req.Password,
         })
         if err != nil {
-            log.Printf("gRPC login error: %v", err)
+            logger.WithFields(logrus.Fields{
+                "service": "gateway-service",
+                "action":  "grpc_login",
+                "error":   err.Error(),
+            }).Error("gRPC login error")
             http.Error(w, "login failed", http.StatusUnauthorized)
             return
         }
@@ -189,7 +303,12 @@ func main() {
             UserId: userID,
         })
         if err != nil {
-            log.Printf("gRPC get followers error: %v", err)
+            logger.WithFields(logrus.Fields{
+                "service": "gateway-service",
+                "action":  "grpc_get_followers",
+                "user_id": userID,
+                "error":   err.Error(),
+            }).Error("gRPC get followers error")
             http.Error(w, "failed to get followers", http.StatusInternalServerError)
             return
         }
@@ -204,6 +323,12 @@ func main() {
         json.NewEncoder(w).Encode(followers)
     }
 
+    // Create router
+    router := mux.NewRouter()
+    
+    // Prometheus metrics endpoint
+    router.Handle("/metrics", promhttp.Handler()).Methods("GET")
+    
     // Main request handler
     handler := func(w http.ResponseWriter, r *http.Request) {
         path := r.URL.Path
@@ -236,19 +361,52 @@ func main() {
         }
 
         // no prefix match -> 502 or simple routing by host/path
+        logger.WithFields(logrus.Fields{
+            "service": "gateway-service",
+            "action":  "route_not_found",
+            "path":    path,
+        }).Warn("Service not found for path")
         http.Error(w, "Service not found", http.StatusBadGateway)
     }
+    
+    // Catch-all route with OpenTelemetry tracing
+    router.PathPrefix("/").Handler(otelhttp.NewHandler(http.HandlerFunc(handler), "gateway"))
 
     srv := &http.Server{
         Addr:         ":8080",
-        Handler:      http.HandlerFunc(handler),
+        Handler:      router,
         ReadTimeout:  10 * time.Second,
         WriteTimeout: 30 * time.Second,
         IdleTimeout:  60 * time.Second,
     }
 
-    log.Printf("gateway service starting on %s", srv.Addr)
-    if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-        log.Fatalf("gateway listen error: %v", err)
-    }
+    go func() {
+        logger.WithFields(logrus.Fields{
+            "service": "gateway-service",
+            "action":  "server_start",
+            "address": srv.Addr,
+        }).Info("Gateway service HTTP server started")
+        if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+            logger.WithFields(logrus.Fields{
+                "service": "gateway-service",
+                "action":  "server_start",
+                "error":   err.Error(),
+            }).Fatal("Failed to start HTTP server")
+        }
+    }()
+
+    stop := make(chan os.Signal, 1)
+    signal.Notify(stop, os.Interrupt)
+    <-stop
+    logger.WithFields(logrus.Fields{
+        "service": "gateway-service",
+        "action":  "shutdown",
+    }).Info("Shutting down server gracefully")
+    shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    srv.Shutdown(shutdownCtx)
+    logger.WithFields(logrus.Fields{
+        "service": "gateway-service",
+        "action":  "shutdown",
+    }).Info("Server shutdown complete")
 }
