@@ -11,7 +11,7 @@ This document describes the observability stack implementation for the microserv
 - All services are instrumented with OpenTelemetry for automatic tracing
 
 ### 2. **Prometheus** - Metrics Collection
-- **URL**: http://localhost:9090
+- **URL**: http://localhost:9095
 - **Purpose**: Collect and store time-series metrics
 - **Metrics Collected**:
   - Application metrics from all services (`/metrics` endpoint)
@@ -96,7 +96,7 @@ curl http://localhost:8080/health
 
 ### Viewing Metrics
 
-1. Open Prometheus: http://localhost:9090
+1. Open Prometheus: http://localhost:9095
 2. Example queries:
    - CPU usage: `rate(container_cpu_usage_seconds_total[5m])`
    - Memory usage: `container_memory_usage_bytes`
@@ -169,7 +169,7 @@ All services log in JSON format with the following fields:
 
 ### Prometheus not scraping metrics
 - Check `/metrics` endpoint is accessible: `curl http://localhost:8081/metrics`
-- Verify Prometheus targets: http://localhost:9090/targets
+- Verify Prometheus targets: http://localhost:9095/targets
 - Check prometheus.yml configuration
 
 ### Loki not receiving logs

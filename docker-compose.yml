@@ -182,6 +182,8 @@ services:
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
+    environment:
+      - DOCKER_HOST=tcp://host.docker.internal:2375
     privileged: true
     restart: unless-stopped
 
