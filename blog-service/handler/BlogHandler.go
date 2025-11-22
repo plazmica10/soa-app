@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 	"log"
+	"os"
+	"fmt"
 
 	"github.com/gorilla/mux"
 
@@ -21,9 +23,15 @@ type blogHandler struct {
 // protected routes (requiring auth) go on 'authRouter'.
 func RegisterRoutes(public *mux.Router, authRouter *mux.Router, repo *repository.BlogRepository) {
 	h := &blogHandler{repo: repo}
-	// public
-	public.HandleFunc("/blogs", h.listBlogs).Methods("GET")
-	public.HandleFunc("/blogs/{id}", h.getBlog).Methods("GET")
+	// protected (reads require authentication/follow checks)
+	if authRouter != nil {
+		authRouter.HandleFunc("/blogs", h.listBlogs).Methods("GET")
+		authRouter.HandleFunc("/blogs/{id}", h.getBlog).Methods("GET")
+	} else {
+		// fallback to public if no auth router provided (handlers will still enforce auth)
+		public.HandleFunc("/blogs", h.listBlogs).Methods("GET")
+		public.HandleFunc("/blogs/{id}", h.getBlog).Methods("GET")
+	}
 	// protected
 	if authRouter != nil {
 		authRouter.HandleFunc("/blogs", h.createBlog).Methods("POST")
@@ -63,7 +71,23 @@ func (h *blogHandler) createBlog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *blogHandler) listBlogs(w http.ResponseWriter, r *http.Request) {
-	blogs, err := h.repo.GetAll(r.Context())
+	// Only authenticated users may read blogs of users they follow.
+	a := auth.GetAuth(r)
+	if a == nil || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Get list of users the current user follows from follower-service
+	following, err := h.getFollowingIDs(r, a.UserID)
+	if err != nil {
+		http.Error(w, "failed to get following: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// include self so users see their own blogs
+	following = append(following, a.UserID)
+
+	blogs, err := h.repo.GetByAuthorIDs(r.Context(), following)
 	if err != nil {
 		http.Error(w, "failed to list blogs", http.StatusInternalServerError)
 		return
@@ -84,6 +108,57 @@ func (h *blogHandler) getBlog(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	// Enforce that only users who follow the author (or the author themself) can read the blog
+	a := auth.GetAuth(r)
+	if a == nil || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if b.AuthorID != a.UserID {
+		// check following list
+		following, err := h.getFollowingIDs(r, a.UserID)
+		if err != nil {
+			http.Error(w, "failed to verify following: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		allowed := false
+		for _, id := range following {
+			if id == b.AuthorID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(b)
+}
+
+// getFollowingIDs calls follower-service to retrieve list of user IDs the given user is following.
+func (h *blogHandler) getFollowingIDs(r *http.Request, userID string) ([]string, error) {
+	base := os.Getenv("FOLLOWER_SERVICE_URL")
+	if base == "" {
+		base = "http://follower-service:8082"
+	}
+	url := fmt.Sprintf("%s/following/%s", base, userID)
+	req, err := http.NewRequestWithContext(r.Context(), "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("follower service returned %d", resp.StatusCode)
+	}
+	var out []string
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

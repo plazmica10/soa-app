@@ -50,6 +50,29 @@ func (r *BlogRepository) GetAll(ctx context.Context) ([]model.Blog, error) {
     return res, cur.Err()
 }
 
+// GetByAuthorIDs returns blogs written by any of the provided author IDs.
+// If authors slice is empty, returns an empty list.
+func (r *BlogRepository) GetByAuthorIDs(ctx context.Context, authors []string) ([]model.Blog, error) {
+    if len(authors) == 0 {
+        return []model.Blog{}, nil
+    }
+    filter := bson.M{"author_id": bson.M{"$in": authors}}
+    cur, err := r.coll.Find(ctx, filter)
+    if err != nil {
+        return nil, err
+    }
+    defer cur.Close(ctx)
+    var res []model.Blog
+    for cur.Next(ctx) {
+        var b model.Blog
+        if err := cur.Decode(&b); err != nil {
+            return nil, err
+        }
+        res = append(res, b)
+    }
+    return res, cur.Err()
+}
+
 func (r *BlogRepository) GetByID(ctx context.Context, id string) (*model.Blog, error) {
     var b model.Blog
     oid, err := primitive.ObjectIDFromHex(id)
