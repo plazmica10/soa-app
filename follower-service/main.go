@@ -3,14 +3,18 @@ package main
 import (
     "context"
     "log"
+    "net"
     "net/http"
     "os"
     "os/signal"
     "time"
 
     "github.com/gorilla/mux"
+    "google.golang.org/grpc"
 
+    pb "github.com/IvanNovakovic/SOA_Proj/protos"
     "follower-service/auth"
+    grpchandler "follower-service/grpc"
     "follower-service/handler"
     "follower-service/repository"
 )
@@ -81,10 +85,31 @@ func main() {
         WriteTimeout: 15 * time.Second,
     }
 
+    // Start HTTP server
     go func() {
-        log.Println("follower-service started on :8082")
+        log.Println("HTTP follower-service started on :8082")
         if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
             log.Fatal(err)
+        }
+    }()
+
+    // Start gRPC server
+    grpcPort := os.Getenv("GRPC_PORT")
+    if grpcPort == "" {
+        grpcPort = "9092"
+    }
+    lis, err := net.Listen("tcp", ":"+grpcPort)
+    if err != nil {
+        log.Fatalf("failed to listen on gRPC port: %v", err)
+    }
+
+    grpcServer := grpc.NewServer()
+    pb.RegisterFollowerServiceServer(grpcServer, grpchandler.NewFollowerServer(repo))
+
+    go func() {
+        log.Printf("gRPC follower-service started on :%s", grpcPort)
+        if err := grpcServer.Serve(lis); err != nil {
+            log.Fatalf("failed to serve gRPC: %v", err)
         }
     }()
 
@@ -92,6 +117,11 @@ func main() {
     signal.Notify(stop, os.Interrupt)
     <-stop
     log.Println("shutting down follower-service...")
+    
+    // Shutdown gRPC server gracefully
+    grpcServer.GracefulStop()
+    
+    // Shutdown HTTP server
     shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
     defer cancel()
     srv.Shutdown(shutdownCtx)

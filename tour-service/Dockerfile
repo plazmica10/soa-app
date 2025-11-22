@@ -1,12 +1,12 @@
 # Multi-stage Dockerfile for tour-service
-FROM golang:1.20-alpine AS builder
+FROM golang:1.22-alpine AS builder
 WORKDIR /src
 
 # Copy module files first to leverage cache
-COPY go.mod go.sum ./
+COPY tour-service/go.mod tour-service/go.sum ./
 RUN go mod download
 
-COPY . .
+COPY tour-service/ ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags='-s -w' -o /out/tour-service ./
 

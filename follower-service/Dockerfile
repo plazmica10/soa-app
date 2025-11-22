@@ -4,14 +4,17 @@
 # require git access during `go mod download`, switch to a builder image that includes
 # git or add git in the builder stage.
 
-FROM golang:1.20-alpine AS builder
+FROM golang:1.22-alpine AS builder
 WORKDIR /src
 
-COPY go.mod go.sum ./
+# Copy protos directory for local module replacement
+COPY protos /protos
+# Copy follower-service files
+COPY follower-service/go.mod follower-service/go.sum ./
 RUN go mod download
 
 # Copy source and build
-COPY . .
+COPY follower-service/ ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags='-s -w' -o /out/follower-service ./
 

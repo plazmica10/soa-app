@@ -1,7 +1,10 @@
-FROM golang:1.20-alpine AS build
+FROM golang:1.22-alpine AS build
 RUN apk add --no-cache git
 WORKDIR /app
-COPY . .
+# Copy protos directory for local module replacement
+COPY protos /protos
+# Copy gateway-service files
+COPY gateway-service/ ./
 RUN go build -o /gateway ./
 
 FROM alpine:3.18

@@ -2,13 +2,15 @@
 FROM golang:1.25-alpine AS builder
 WORKDIR /app
 
+# Copy protos directory for local module replacement
+COPY protos /protos
 # copy go mod and sum files
-COPY src/go.mod src/go.sum ./src/
+COPY stakeholders-service/src/go.mod stakeholders-service/src/go.sum ./src/
 WORKDIR /app/src
 RUN go mod download
 
 # copy the project and build the binary from src/
-COPY src/ ./
+COPY stakeholders-service/src/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/stakeholders-service main.go
 
 # runtime stage

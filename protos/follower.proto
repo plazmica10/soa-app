@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+option go_package = "github.com/IvanNovakovic/SOA_Proj/protos";
+
+package follower;
+
+// Zahtev za dobijanje pratilaca
+message GetFollowersRequest {
+  string user_id = 1;
+}
+
+// Jedan pratilac
+message Follower {
+  string user_id = 1;
+}
+
+// Odgovor sa listom pratilaca
+message GetFollowersResponse {
+  repeated Follower followers = 1;
+}
+
+// Servis za praćenje korisnika
+service FollowerService {
+  // Dobijanje liste pratilaca za korisnika
+  rpc GetFollowers(GetFollowersRequest) returns (GetFollowersResponse);
+}
