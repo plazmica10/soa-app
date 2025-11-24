@@ -27,9 +27,13 @@ func RegisterRoutes(router *mux.Router, userRepo *repository.UserRepository) {
 
 	router.HandleFunc("/users", h.ListUsers).Methods("GET")
 	router.HandleFunc("/users", h.CreateUser).Methods("POST")
+	router.HandleFunc("/users/me", h.GetCurrentUser).Methods("GET")
+	router.HandleFunc("/users/me", h.UpdateCurrentUser).Methods("PATCH", "PUT")
 	router.HandleFunc("/users/{id}", h.GetUserByID).Methods("GET")
 	router.HandleFunc("/users/{id}", h.UpdateUserFields).Methods("PUT", "PATCH")
 	router.HandleFunc("/users/{id}/password", h.UpdatePassword).Methods("PATCH")
+	router.HandleFunc("/users/{id}/block", h.BlockUser).Methods("PATCH")
+	router.HandleFunc("/users/{id}/unblock", h.UnblockUser).Methods("PATCH")
 	router.HandleFunc("/users/{id}", h.DeleteUser).Methods("DELETE")
 }
 
@@ -61,6 +65,12 @@ func (h *UserHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to list users", http.StatusInternalServerError)
 		return
 	}
+
+	// Remove passwords from response
+	for i := range users {
+		users[i].Password = ""
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(w, http.StatusOK, users)
 }
@@ -77,7 +87,71 @@ func (h *UserHandler) GetUserByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "user not found", http.StatusNotFound)
 		return
 	}
+	user.Password = ""
 	writeJSON(w, http.StatusOK, user)
+}
+
+func (h *UserHandler) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	authCtx := GetAuth(r)
+	if authCtx == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	id, err := parseObjectID(authCtx.UserID)
+	if err != nil {
+		http.Error(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.repo.GetByID(ctx, id)
+	if err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	user.Password = ""
+	writeJSON(w, http.StatusOK, user)
+}
+
+func (h *UserHandler) UpdateCurrentUser(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	authCtx := GetAuth(r)
+	if authCtx == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	id, err := parseObjectID(authCtx.UserID)
+	if err != nil {
+		http.Error(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+
+	var fields map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	// Prevent changing sensitive fields
+	delete(fields, "_id")
+	delete(fields, "password")
+	delete(fields, "roles")
+	delete(fields, "is_blocked")
+
+	if err := h.repo.UpdateFields(ctx, id, bson.M(fields)); err != nil {
+		http.Error(w, "failed to update user", http.StatusInternalServerError)
+		return
+	}
+
+	updated, err := h.repo.GetByID(ctx, id)
+	if err != nil {
+		http.Error(w, "failed to load updated user", http.StatusInternalServerError)
+		return
+	}
+	updated.Password = ""
+	writeJSON(w, http.StatusOK, updated)
 }
 
 func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
@@ -173,6 +247,34 @@ func (h *UserHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *UserHandler) BlockUser(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := parseObjectID(mux.Vars(r)["id"])
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	if err := h.repo.UpdateFields(ctx, id, bson.M{"is_blocked": true}); err != nil {
+		http.Error(w, "failed to block user", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "user blocked"})
+}
+
+func (h *UserHandler) UnblockUser(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := parseObjectID(mux.Vars(r)["id"])
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	if err := h.repo.UpdateFields(ctx, id, bson.M{"is_blocked": false}); err != nil {
+		http.Error(w, "failed to unblock user", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "user unblocked"})
 }
 
 // UTILITIES ----------------------------------------------------------------

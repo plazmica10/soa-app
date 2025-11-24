@@ -160,6 +160,22 @@ services:
       driver: "json-file"
       options:
         tag: "purchase-service"
+  
+  frontend:
+    build:
+      context: ./frontend-service
+      dockerfile: Dockerfile
+    container_name: frontend
+    depends_on:
+      - gateway
+    ports:
+      - "8087:8085"
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        tag: "frontend-service"
+
 
   # Monitoring Stack
   prometheus:

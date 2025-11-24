@@ -26,13 +26,16 @@ func RegisterAuthRoutes(r *mux.Router, repo *repository.UserRepository) {
 }
 
 type registerReq struct {
-	Username string        `json:"username"`
-	Password string        `json:"password"`
-	Email    string        `json:"email"`
-	Name     string        `json:"name"`
-	Surname  string        `json:"surname"`
-	Address  model.Address `json:"address"`
-	Roles    []string      `json:"roles"`
+	Username     string        `json:"username"`
+	Password     string        `json:"password"`
+	Email        string        `json:"email"`
+	Name         string        `json:"name"`
+	Surname      string        `json:"surname"`
+	Address      model.Address `json:"address"`
+	Roles        []string      `json:"roles"`
+	ProfileImage string        `json:"profile_image"`
+	Biography    string        `json:"biography"`
+	Motto        string        `json:"motto"`
 }
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
@@ -66,13 +69,17 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u := model.User{
-		Username: in.Username,
-		Password: hash,
-		Email:    in.Email,
-		Name:     strings.TrimSpace(in.Name),
-		Surname:  strings.TrimSpace(in.Surname),
-		Roles:    append([]string{}, in.Roles...),
-		Address:  in.Address,
+		Username:     in.Username,
+		Password:     hash,
+		Email:        in.Email,
+		Name:         strings.TrimSpace(in.Name),
+		Surname:      strings.TrimSpace(in.Surname),
+		Roles:        append([]string{}, in.Roles...),
+		Address:      in.Address,
+		ProfileImage: strings.TrimSpace(in.ProfileImage),
+		Biography:    strings.TrimSpace(in.Biography),
+		Motto:        strings.TrimSpace(in.Motto),
+		IsBlocked:    false,
 	}
 	id, err := h.repo.Create(r.Context(), &u)
 	if err != nil {

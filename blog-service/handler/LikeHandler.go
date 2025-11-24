@@ -1,156 +1,194 @@
 package handler
 
 import (
-    "encoding/json"
-    "net/http"
-    "strings"
+	"encoding/json"
+	"net/http"
+	"strings"
 
-    "github.com/gorilla/mux"
-    "go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/gorilla/mux"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
-    "blog-service/auth"
-    "blog-service/model"
-    "blog-service/repository"
+	"blog-service/auth"
+	"blog-service/model"
+	"blog-service/repository"
 )
 
 type likeHandler struct {
-    repo     *repository.LikeRepository
-    blogRepo *repository.BlogRepository
+	repo     *repository.LikeRepository
+	blogRepo *repository.BlogRepository
 }
 
 // RegisterLikeRoutes registers like endpoints
 func RegisterLikeRoutes(r *mux.Router, lr *repository.LikeRepository, br *repository.BlogRepository) {
-    h := &likeHandler{repo: lr, blogRepo: br}
-    // likes are mutating operations; require auth
-    if r != nil {
-        r.HandleFunc("/blogs/{id}/likes", h.createLike).Methods("POST")
-        r.HandleFunc("/blogs/{id}/likes", h.deleteLike).Methods("DELETE")
-    }
+	h := &likeHandler{repo: lr, blogRepo: br}
+	// likes are mutating operations; require auth
+	if r != nil {
+		r.HandleFunc("/blogs/{id}/likes", h.createLike).Methods("POST")
+		r.HandleFunc("/blogs/{id}/likes", h.deleteLike).Methods("DELETE")
+		r.HandleFunc("/blogs/{id}/likes/check", h.checkLike).Methods("GET")
+	}
 }
 
 type likeReq struct {
-    // user_id is optional when the request contains a valid JWT; middleware will provide it
-    UserID string `json:"user_id"`
+	// user_id is optional when the request contains a valid JWT; middleware will provide it
+	UserID string `json:"user_id"`
 }
 
 func (h *likeHandler) createLike(w http.ResponseWriter, r *http.Request) {
-    vars := mux.Vars(r)
-    id := vars["id"]
-    if id == "" {
-        http.Error(w, "blog id required", http.StatusBadRequest)
-        return
-    }
-    var in likeReq
-    if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-        http.Error(w, "invalid body", http.StatusBadRequest)
-        return
-    }
-    // resolve user from JWT if present
-    var userOID primitive.ObjectID
-    if a := auth.GetAuth(r); a != nil && a.UserID != "" {
-        u, err := primitive.ObjectIDFromHex(a.UserID)
-        if err != nil {
-            http.Error(w, "invalid user id in token", http.StatusBadRequest)
-            return
-        }
-        userOID = u
-    } else {
-        if in.UserID == "" {
-            http.Error(w, "user_id required", http.StatusBadRequest)
-            return
-        }
-        u, err := primitive.ObjectIDFromHex(in.UserID)
-        if err != nil {
-            http.Error(w, "invalid user id", http.StatusBadRequest)
-            return
-        }
-        userOID = u
-    }
-    blogOID, err := primitive.ObjectIDFromHex(id)
-    if err != nil {
-        http.Error(w, "invalid blog id", http.StatusBadRequest)
-        return
-    }
-    // ensure blog exists
-    if _, err := h.blogRepo.GetByID(r.Context(), id); err != nil {
-        http.Error(w, "blog not found", http.StatusNotFound)
-        return
-    }
-    l := model.Like{BlogID: blogOID, UserID: userOID}
-    err = h.repo.Create(r.Context(), &l)
-    if err != nil {
-        // handle duplicate (already liked) as idempotent
-        if mongoErrIsDuplicate(err) {
-            w.WriteHeader(http.StatusOK)
-            w.Write([]byte("already liked"))
-            return
-        }
-        http.Error(w, "failed to create like", http.StatusInternalServerError)
-        return
-    }
-    // increment blog likes_count
-    _ = h.blogRepo.UpdateLikesCount(r.Context(), blogOID, 1)
-    w.WriteHeader(http.StatusCreated)
-    json.NewEncoder(w).Encode(l)
+	vars := mux.Vars(r)
+	id := vars["id"]
+	if id == "" {
+		http.Error(w, "blog id required", http.StatusBadRequest)
+		return
+	}
+	var in likeReq
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	// resolve user from JWT if present
+	var userOID primitive.ObjectID
+	if a := auth.GetAuth(r); a != nil && a.UserID != "" {
+		u, err := primitive.ObjectIDFromHex(a.UserID)
+		if err != nil {
+			http.Error(w, "invalid user id in token", http.StatusBadRequest)
+			return
+		}
+		userOID = u
+	} else {
+		if in.UserID == "" {
+			http.Error(w, "user_id required", http.StatusBadRequest)
+			return
+		}
+		u, err := primitive.ObjectIDFromHex(in.UserID)
+		if err != nil {
+			http.Error(w, "invalid user id", http.StatusBadRequest)
+			return
+		}
+		userOID = u
+	}
+	blogOID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		http.Error(w, "invalid blog id", http.StatusBadRequest)
+		return
+	}
+	// ensure blog exists
+	if _, err := h.blogRepo.GetByID(r.Context(), id); err != nil {
+		http.Error(w, "blog not found", http.StatusNotFound)
+		return
+	}
+	l := model.Like{BlogID: blogOID, UserID: userOID}
+	err = h.repo.Create(r.Context(), &l)
+	if err != nil {
+		// handle duplicate (already liked) as idempotent
+		if mongoErrIsDuplicate(err) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("already liked"))
+			return
+		}
+		http.Error(w, "failed to create like", http.StatusInternalServerError)
+		return
+	}
+	// increment blog likes_count
+	_ = h.blogRepo.UpdateLikesCount(r.Context(), blogOID, 1)
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(l)
 }
 
 func (h *likeHandler) deleteLike(w http.ResponseWriter, r *http.Request) {
-    vars := mux.Vars(r)
-    id := vars["id"]
-    if id == "" {
-        http.Error(w, "blog id required", http.StatusBadRequest)
-        return
-    }
-    var in likeReq
-    if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-        http.Error(w, "invalid body", http.StatusBadRequest)
-        return
-    }
-    // resolve user from JWT if present
-    var userOID primitive.ObjectID
-    if a := auth.GetAuth(r); a != nil && a.UserID != "" {
-        u, err := primitive.ObjectIDFromHex(a.UserID)
-        if err != nil {
-            http.Error(w, "invalid user id in token", http.StatusBadRequest)
-            return
-        }
-        userOID = u
-    } else {
-        if in.UserID == "" {
-            http.Error(w, "user_id required", http.StatusBadRequest)
-            return
-        }
-        u, err := primitive.ObjectIDFromHex(in.UserID)
-        if err != nil {
-            http.Error(w, "invalid user id", http.StatusBadRequest)
-            return
-        }
-        userOID = u
-    }
-    blogOID, err := primitive.ObjectIDFromHex(id)
-    if err != nil {
-        http.Error(w, "invalid blog id", http.StatusBadRequest)
-        return
-    }
-    // delete like
-    deleted, err := h.repo.DeleteByBlogAndUser(r.Context(), blogOID, userOID)
-    if err != nil {
-        http.Error(w, "failed to delete like", http.StatusInternalServerError)
-        return
-    }
-    if deleted > 0 {
-        _ = h.blogRepo.UpdateLikesCount(r.Context(), blogOID, -1)
+	vars := mux.Vars(r)
+	id := vars["id"]
+	if id == "" {
+		http.Error(w, "blog id required", http.StatusBadRequest)
+		return
+	}
+	var in likeReq
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	// resolve user from JWT if present
+	var userOID primitive.ObjectID
+	if a := auth.GetAuth(r); a != nil && a.UserID != "" {
+		u, err := primitive.ObjectIDFromHex(a.UserID)
+		if err != nil {
+			http.Error(w, "invalid user id in token", http.StatusBadRequest)
+			return
+		}
+		userOID = u
+	} else {
+		if in.UserID == "" {
+			http.Error(w, "user_id required", http.StatusBadRequest)
+			return
+		}
+		u, err := primitive.ObjectIDFromHex(in.UserID)
+		if err != nil {
+			http.Error(w, "invalid user id", http.StatusBadRequest)
+			return
+		}
+		userOID = u
+	}
+	blogOID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		http.Error(w, "invalid blog id", http.StatusBadRequest)
+		return
+	}
+	// delete like
+	deleted, err := h.repo.DeleteByBlogAndUser(r.Context(), blogOID, userOID)
+	if err != nil {
+		http.Error(w, "failed to delete like", http.StatusInternalServerError)
+		return
+	}
+	if deleted > 0 {
+		_ = h.blogRepo.UpdateLikesCount(r.Context(), blogOID, -1)
 		http.Error(w, "like removed", http.StatusOK)
 		return
-    }
-    w.WriteHeader(http.StatusNoContent)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *likeHandler) checkLike(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+	if id == "" {
+		http.Error(w, "blog id required", http.StatusBadRequest)
+		return
+	}
+	blogOID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		http.Error(w, "invalid blog id", http.StatusBadRequest)
+		return
+	}
+
+	// Get user from JWT
+	var userOID primitive.ObjectID
+	if a := auth.GetAuth(r); a != nil && a.UserID != "" {
+		u, err := primitive.ObjectIDFromHex(a.UserID)
+		if err != nil {
+			http.Error(w, "invalid user id in token", http.StatusBadRequest)
+			return
+		}
+		userOID = u
+	} else {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	exists, err := h.repo.ExistsByBlogAndUser(r.Context(), blogOID, userOID)
+	if err != nil {
+		http.Error(w, "failed to check like status", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"liked": exists})
 }
 
 // mongoErrIsDuplicate checks if err is a duplicate key error (11000)
 func mongoErrIsDuplicate(err error) bool {
-    // avoid importing mongo types here; do a string check as lightweight approach
-    if err == nil {
-        return false
-    }
-    return strings.Contains(err.Error(), "E11000") || strings.Contains(err.Error(), "duplicate key")
+	// avoid importing mongo types here; do a string check as lightweight approach
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "E11000") || strings.Contains(err.Error(), "duplicate key")
 }
