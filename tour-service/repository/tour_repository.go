@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"tour-service/model"
@@ -323,6 +324,14 @@ func (r *TourRepository) CreateExecution(ctx context.Context, exec *model.TourEx
 		return nil, mongo.ErrNilDocument
 	}
 
+	hasActive, err := r.HasAnyActiveExecution(ctx, exec.TouristID)
+	if err != nil {
+		return nil, err
+	}
+	if hasActive {
+		return nil, errors.New("tourist already has a active tour execution")
+	}
+
 	exec.ID = primitive.NewObjectID()
 	exec.StartedAt = time.Now().UTC()
 	exec.LastActivity = exec.StartedAt
@@ -407,4 +416,53 @@ func (r *TourRepository) AddLocation(ctx context.Context, execId primitive.Objec
 
 	_, err := r.execCol.UpdateOne(ctx, filter, update, opts)
 	return err
+}
+
+func (r *TourRepository) GetExecutionByID(ctx context.Context, id primitive.ObjectID) (*model.TourExecution, error) {
+	if id.IsZero() {
+		return nil, mongo.ErrNilDocument
+	}
+
+	var exec model.TourExecution
+	err := r.execCol.FindOne(ctx, bson.M{"_id": id}).Decode(&exec)
+	if err != nil {
+		return nil, err
+	}
+
+	return &exec, nil
+}
+
+func (r *TourRepository) CompletePoint(ctx context.Context, execId primitive.ObjectID, cp model.CompletedPoint) error {
+	if execId.IsZero() {
+		return mongo.ErrNilDocument
+	}
+
+	if cp.ReachedAt.IsZero() {
+		cp.ReachedAt = time.Now().UTC()
+	}
+
+	update := bson.M{
+		"$push": bson.M{
+			"completedPoints": cp,
+		},
+		"$set": bson.M{
+			"lastActivity": time.Now().UTC(),
+		},
+	}
+
+	_, err := r.execCol.UpdateOne(ctx, bson.M{"_id": execId}, update)
+	return err
+}
+func (r *TourRepository) HasAnyActiveExecution(ctx context.Context, touristId string) (bool, error) {
+	filter := bson.M{
+		"touristId": touristId,
+		"status":    model.ExecutionActive,
+	}
+
+	count, err := r.execCol.CountDocuments(ctx, filter)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
 }
