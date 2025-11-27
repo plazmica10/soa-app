@@ -266,6 +266,8 @@ func addLocation(repo tourExecRepo) http.HandlerFunc {
 			Timestamp: time.Now().UTC(),
 		}
 
+		exec.LastActivity = time.Now().UTC()
+
 		if err := repo.AddLocation(ctx, objID, loc); err != nil {
 			log.Println("add location error:", err)
 			http.Error(w, "failed to add location", http.StatusInternalServerError)
@@ -357,6 +359,8 @@ func completePoint(repo tourExecRepo) http.HandlerFunc {
 			KeyPointID: kpID,
 			ReachedAt:  time.Now().UTC(),
 		}
+
+		exec.LastActivity = time.Now().UTC()
 
 		if err := repo.CompletePoint(ctx, objID, cp); err != nil {
 			log.Println("complete point error:", err)
