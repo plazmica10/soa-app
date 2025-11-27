@@ -139,6 +139,7 @@ func main() {
 	handler.RegisterRoutes(r, authSub, repo)
 	handler.RegisterKeyPointRoutes(r, authSub, repo)
 	handler.RegisterReviewRoutes(r, authSub, repo)
+	handler.RegisterExecutionRoutes(authSub, repo)
 
 	srv := &http.Server{
 		Handler:      r,

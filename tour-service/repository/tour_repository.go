@@ -14,10 +14,11 @@ import (
 )
 
 type TourRepository struct {
-	client *mongo.Client
-	col    *mongo.Collection
-	kpCol  *mongo.Collection
-	revCol *mongo.Collection
+	client  *mongo.Client
+	col     *mongo.Collection
+	kpCol   *mongo.Collection
+	revCol  *mongo.Collection
+	execCol *mongo.Collection
 }
 
 func NewTourRepository(ctx context.Context, uri string, dbName string) (*TourRepository, error) {
@@ -31,6 +32,8 @@ func NewTourRepository(ctx context.Context, uri string, dbName string) (*TourRep
 	col := db.Collection("tours")
 	kpCol := db.Collection("keypoints")
 	revCol := db.Collection("reviews")
+	execCol := db.Collection("executions")
+
 	// create simple index on authorId and tourId and indexes for keypoints/reviews
 	_, _ = col.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{{Key: "authorId", Value: 1}},
@@ -45,7 +48,16 @@ func NewTourRepository(ctx context.Context, uri string, dbName string) (*TourRep
 	_, _ = revCol.Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys: bson.D{{Key: "authorId", Value: 1}},
 	})
-	return &TourRepository{client: client, col: col, kpCol: kpCol, revCol: revCol}, nil
+	_, _ = execCol.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "tourId", Value: 1}},
+	})
+	_, _ = execCol.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "touristId", Value: 1}},
+	})
+	_, _ = execCol.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "status", Value: 1}},
+	})
+	return &TourRepository{client: client, col: col, kpCol: kpCol, revCol: revCol, execCol: execCol}, nil
 }
 
 func (r *TourRepository) Close(ctx context.Context) error {
@@ -303,4 +315,67 @@ func (r *TourRepository) ActivateTour(ctx context.Context, tourId string, author
 		return nil, err
 	}
 	return &tour, nil
+}
+
+// TourExecution methods
+func (r *TourRepository) CreateExecution(ctx context.Context, exec *model.TourExecution) (*model.TourExecution, error) {
+	if exec == nil {
+		return nil, mongo.ErrNilDocument
+	}
+
+	exec.ID = primitive.NewObjectID()
+	exec.StartedAt = time.Now().UTC()
+	exec.LastActivity = exec.StartedAt
+
+	// Ako CompletedPoints nije inicijalizovan, postavi prazan slice
+	if exec.CompletedPoints == nil {
+		exec.CompletedPoints = []model.CompletedPoint{}
+	}
+
+	res, err := r.execCol.InsertOne(ctx, exec)
+	if err != nil {
+		return nil, err
+	}
+
+	exec.ID = res.InsertedID.(primitive.ObjectID)
+	return exec, nil
+}
+
+func (r *TourRepository) GetActiveExecution(ctx context.Context, touristId string, tourId primitive.ObjectID) (*model.TourExecution, error) {
+	filter := bson.M{
+		"tourId":    tourId,
+		"touristId": touristId,
+		"status":    model.ExecutionActive,
+	}
+
+	var exec model.TourExecution
+	err := r.execCol.FindOne(ctx, filter).Decode(&exec)
+	if err != nil {
+		return nil, err
+	}
+
+	return &exec, nil
+}
+
+func (r *TourRepository) UpdateExecution(ctx context.Context, exec *model.TourExecution) error {
+	if exec == nil || exec.ID.IsZero() {
+		return mongo.ErrNilDocument
+	}
+
+	// Osiguraj da CompletedPoints nije nil
+	if exec.CompletedPoints == nil {
+		exec.CompletedPoints = []model.CompletedPoint{}
+	}
+
+	update := bson.M{
+		"$set": bson.M{
+			"status":          exec.Status,
+			"finishedAt":      exec.FinishedAt,
+			"lastActivity":    exec.LastActivity,
+			"completedPoints": exec.CompletedPoints,
+		},
+	}
+
+	_, err := r.execCol.UpdateOne(ctx, bson.M{"_id": exec.ID}, update)
+	return err
 }
