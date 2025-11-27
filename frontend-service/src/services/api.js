@@ -269,8 +269,38 @@ export const api = {
   async getPurchasedTours() {
     const response = await apiClient.get('/tokens')
     return response.data
-  }
-  
+  },
+   async startExecution(tourId) {
+    const response = await apiClient.post('/executions', { tourId })
+    return response.data
+  },
+  async getActiveExecution(tourId) {
+    const response = await apiClient.get(`/executions/${tourId}/active`)
+    return response.data
+  },
+
+  async updateExecution(execId, { status, completedPoints }) {
+    const response = await apiClient.put(`/executions/${execId}`, {
+      status,
+      completedPoints
+    })
+    return response.data
+  },
+
+  async addExecutionLocation(execId, { latitude, longitude }) {
+    const response = await apiClient.post(`/executions/${execId}/location`, {
+      latitude,
+      longitude
+    })
+    return response.data
+  },
+
+  async completeExecutionPoint(execId, keyPointId) {
+    const response = await apiClient.post(`/executions/${execId}/complete`, {
+      keyPointId
+    })
+    return response.data
+  }  
 }
 
 export default api

@@ -75,9 +75,10 @@ func createExecution(repo tourExecRepo) http.HandlerFunc {
 		}
 
 		exec := &model.TourExecution{
-			TourID:    tourObjID,
-			TouristID: a.UserID,
-			Status:    model.ExecutionActive,
+			TourID:       tourObjID,
+			TouristID:    a.UserID,
+			Status:       model.ExecutionActive,
+			LastActivity: time.Now().UTC(),
 		}
 
 		created, err := repo.CreateExecution(ctx, exec)
@@ -216,49 +217,16 @@ func addLocation(repo tourExecRepo) http.HandlerFunc {
 
 		vars := mux.Vars(r)
 		execId := vars["execId"]
-		if execId == "" {
-			http.Error(w, "execution ID required", http.StatusBadRequest)
-			return
-		}
-
-		objID, err := primitive.ObjectIDFromHex(execId)
-		if err != nil {
-			http.Error(w, "invalid execution ID", http.StatusBadRequest)
-			return
-		}
+		objID, _ := primitive.ObjectIDFromHex(execId)
 
 		var req addLocationRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid request", http.StatusBadRequest)
-			return
-		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
 
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		exec, err := repo.GetExecutionByID(ctx, objID)
-		if err != nil {
-			http.Error(w, "execution not found", http.StatusNotFound)
-			return
-		}
-
-		kps, err := repo.GetKeyPointsByTour(ctx, exec.TourID)
-		if err != nil {
-			http.Error(w, "failed to get keypoints", http.StatusInternalServerError)
-			return
-		}
-
-		nearAny := false
-		for _, kp := range kps {
-			if utils.IsNearby(req.Latitude, req.Longitude, kp.Latitude, kp.Longitude) {
-				nearAny = true
-				break
-			}
-		}
-		if !nearAny {
-			http.Error(w, "location too far from any keypoint", http.StatusBadRequest)
-			return
-		}
+		exec, _ := repo.GetExecutionByID(ctx, objID)
+		kps, _ := repo.GetKeyPointsByTour(ctx, exec.TourID)
 
 		loc := model.Location{
 			Latitude:  req.Latitude,
@@ -267,11 +235,24 @@ func addLocation(repo tourExecRepo) http.HandlerFunc {
 		}
 
 		exec.LastActivity = time.Now().UTC()
+		_ = repo.AddLocation(ctx, objID, loc)
 
-		if err := repo.AddLocation(ctx, objID, loc); err != nil {
-			log.Println("add location error:", err)
-			http.Error(w, "failed to add location", http.StatusInternalServerError)
-			return
+		// automatsko kompletiranje keypoints
+		for _, kp := range kps {
+			alreadyCompleted := false
+			for _, cp := range exec.CompletedPoints {
+				if cp.KeyPointID == kp.ID {
+					alreadyCompleted = true
+					break
+				}
+			}
+			if !alreadyCompleted && utils.IsNearby(req.Latitude, req.Longitude, kp.Latitude, kp.Longitude) {
+				cp := model.CompletedPoint{
+					KeyPointID: kp.ID,
+					ReachedAt:  time.Now().UTC(),
+				}
+				_ = repo.CompletePoint(ctx, objID, cp)
+			}
 		}
 
 		w.WriteHeader(http.StatusNoContent)

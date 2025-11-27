@@ -212,12 +212,13 @@ func main() {
 		"/recommendations": "http://follower-service:8082",
 
 		// tour service
-		"/tour":      "http://tour-service:8083",
-		"/tours":     "http://tour-service:8083",
-		"/review":    "http://tour-service:8083",
-		"/reviews":   "http://tour-service:8083",
-		"/kp":        "http://tour-service:8083",
-		"/keypoints": "http://tour-service:8083",
+		"/tour":       "http://tour-service:8083",
+		"/tours":      "http://tour-service:8083",
+		"/review":     "http://tour-service:8083",
+		"/reviews":    "http://tour-service:8083",
+		"/kp":         "http://tour-service:8083",
+		"/keypoints":  "http://tour-service:8083",
+		"/executions": "http://tour-service:8083",
 
 		// stakeholders (users/auth) - register still via HTTP
 		"/health":   "http://stakeholders-service:8080",

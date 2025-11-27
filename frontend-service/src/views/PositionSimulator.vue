@@ -37,7 +37,7 @@
           </div>
         </div>
 
-        <div class="panel-card">
+        <div class="panel-card" v-if="!hideInstructions">
           <h3>Instructions</h3>
           <ul class="instructions">
             <li>Click on the map to simulate your current position</li>
@@ -59,7 +59,13 @@ import 'leaflet/dist/leaflet.css'
 
 export default {
   name: 'PositionSimulator',
-  setup() {
+  props: {
+    hideInstructions: {
+      type: Boolean,
+      default: false
+    }
+  },
+  setup(props) {
     const router = useRouter()
     const mapContainer = ref(null)
     const currentPosition = ref(null)
@@ -163,7 +169,9 @@ export default {
       mapContainer,
       currentPosition,
       formatTime,
-      goBack
+      goBack,
+      hideInstructions: props.hideInstructions
+
     }
   }
 }

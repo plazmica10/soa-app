@@ -4,60 +4,25 @@
     <div v-else-if="error" class="error-message">{{ error }}</div>
 
     <div v-else class="tour-content">
-      <!-- Tour Header -->
       <div class="tour-header">
-        <div>
-          <h1>{{ tour.name }}</h1>
-          <div class="tour-meta">
-            <span class="status-badge" :class="tour.status">{{ tour.status }}</span>
-            <span class="difficulty">Difficulty: {{ tour.difficulty }}</span>
-            <span class="price">Price: ${{ tour.price }}</span>
-          </div>
+        <h1>Purchased tour: {{ tour.name }}</h1>
+        <div class="tour-meta">
+          <span class="status-badge" :class="tour.status">{{ tour.status }}</span>
+          <span class="difficulty">Difficulty: {{ tour.difficulty }}</span>
+          <span class="price">Price: ${{ tour.price }}</span>
         </div>
       </div>
 
-      <!-- Tour Description -->
-      <div v-if="tour.description" class="tour-description">
-        <h2>Description</h2>
-        <p>{{ tour.description }}</p>
-      </div>
+      <!-- Position Simulator -->
+      <PositionSimulator
+        v-if="execution"
+        :tour-id="tour.id"
+        :execution="execution"
+        :hide-instructions="true"
+        @update-location="onLocationUpdate"
+      />
 
-      <!-- Tags -->
-      <div v-if="tour.tags && tour.tags.length > 0" class="tour-tags">
-        <h3>Tags</h3>
-        <div class="tags-list">
-          <span v-for="tag in tour.tags" :key="tag" class="tag">{{ tag }}</span>
-        </div>
-      </div>
-
-      <!-- Travel Times & Distance -->
-      <div v-if="(tour.distance > 0) || (tour.durations && (tour.durations.walking > 0 || tour.durations.biking > 0 || tour.durations.driving > 0))" class="tour-travel-times">
-        <h3>Tour Information</h3>
-        <div class="travel-times-grid">
-          <div v-if="tour.distance > 0" class="travel-time-card distance-card">
-            <span class="travel-icon">📏</span>
-            <span class="travel-label">Distance</span>
-            <span class="travel-value">{{ tour.distance.toFixed(2) }} km</span>
-          </div>
-          <div v-if="tour.durations.walking > 0" class="travel-time-card">
-            <span class="travel-icon">🚶</span>
-            <span class="travel-label">Walking</span>
-            <span class="travel-value">{{ formatDuration(tour.durations.walking) }}</span>
-          </div>
-          <div v-if="tour.durations.biking > 0" class="travel-time-card">
-            <span class="travel-icon">🚴</span>
-            <span class="travel-label">Biking</span>
-            <span class="travel-value">{{ formatDuration(tour.durations.biking) }}</span>
-          </div>
-          <div v-if="tour.durations.driving > 0" class="travel-time-card">
-            <span class="travel-icon">🚗</span>
-            <span class="travel-label">Driving</span>
-            <span class="travel-value">{{ formatDuration(tour.durations.driving) }}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Key Points Section -->
+       <!-- Key Points Section -->
       <div class="section keypoints-section">
         <div class="section-header">
           <h2>Key Points</h2>
@@ -69,12 +34,26 @@
             >
               🗺️ View Route Map
             </router-link>
+            <router-link 
+              v-if="isAuthor"
+              :to="`/tours/${tour.id}/keypoints/manage`" 
+              class="btn-manage"
+            >
+              ⚙️ Manage Points
+            </router-link>
           </div>
         </div>
 
         <div v-if="loadingKeyPoints" class="loading-small">Loading key points...</div>
         <div v-else-if="keyPoints.length === 0" class="empty-message">
-          <p>No key points available.</p>
+          <p>No key points added yet.</p>
+          <router-link 
+            v-if="isAuthor" 
+            :to="`/tours/${tour.id}/keypoints/manage`" 
+            class="btn-add-inline"
+          >
+            + Add Your First Point
+          </router-link>
         </div>
         <div v-else class="keypoints-grid">
           <div v-for="(kp, index) in keyPoints" :key="kp.id" class="keypoint-card">
@@ -206,80 +185,122 @@
         </div>
       </div>
 
+
+      <!-- Start / Finish Tour Buttons -->
+      <div class="section start-tour-section">
+        <div class="section-header">
+          <h2>Tour Actions</h2>
+          <div class="header-actions">
+            <!-- Start Button -->
+            <button 
+              class="btn-action btn-primary"
+              @click="startTour"
+              :disabled="execution || tour.status !== 'published'"
+            >
+              Start Tour
+            </button>
+
+            <!-- Finish Button -->
+            <button 
+              v-if="execution && execution.status === 'active'" 
+              class="btn-action btn-secondary"
+              @click="finishTour"
+            >
+              Finish Tour
+            </button>
+
+            <!-- Optional: Abandon -->
+            <button 
+              v-if="execution && execution.status === 'active'" 
+              class="btn-action btn-abandon"
+              @click="abandonTour"
+            >
+              Abandon Tour
+            </button>
+          </div>
+        </div>
+
+        <div v-if="execution" class="execution-status-box">
+          Status: <span :class="['status-badge', execution.status.toLowerCase()]">{{ execution.status }}</span>
+        </div>
+      </div>
+
     </div>
   </div>
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted, computed} from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../services/api'
 import { authStore } from '../stores/authStore'
+import PositionSimulator from '../views/PositionSimulator.vue'
 
 export default {
-  name: 'PurchaseTourDetail',
+  name: 'PurchasedTourDetail',
+  components: { PositionSimulator },
   setup() {
     const route = useRoute()
     const tourId = route.params.id
 
-    const tour = ref({
-      tags: [],
-      name: '',
-      description: '',
-      status: '',
-      difficulty: '',
-      price: 0,
-      durations: { walking: 0, biking: 0, driving: 0 }
-    })
+    const tour = ref({})
     const keyPoints = ref([])
     const reviews = ref([])
-
+    const execution = ref(null)
     const loading = ref(true)
-    const loadingKeyPoints = ref(false)
-    const loadingReviews = ref(false)
     const error = ref('')
 
     const showReviewForm = ref(false)
-    const reviewForm = ref({ rating: 0, comment: '', visitedAt: null })
-    const imagesText = ref('')
     const reviewLoading = ref(false)
+    const imagesText = ref('')
+    const loadingReviews = ref(false)
+
+    const reviewForm = ref({
+      rating: 0,
+      comment: '',
+      visitedAt: null
+    })
 
     const today = new Date().toISOString().split('T')[0]
 
-    const canAddReview = computed(() => authStore.isAuthenticated.value)
+    const isAuthor = computed(() => {
+      const userId = authStore.getUserId()
+      return userId === tour.value.authorId
+    })
+
+    const canAddReview = computed(() => {
+      return authStore.isAuthenticated.value && !isAuthor.value
+    })
 
     const fetchTour = async () => {
       loading.value = true
-      error.value = ''
       try {
         const data = await api.getTourById(tourId)
-        // Ensure status is 'purchased' if needed
-        tour.value = { ...data, status: 'purchased', tags: data.tags || [] }
+        tour.value = { ...data, tags: data.tags || [] }
+        await fetchExecution()
       } catch (err) {
-        error.value = err.response?.data?.error || err.message || 'Failed to load tour'
+        error.value = err.message || 'Failed to load tour'
       } finally {
         loading.value = false
       }
     }
 
     const fetchKeyPoints = async () => {
-      loadingKeyPoints.value = true
       try {
         const data = await api.getKeyPoints(tourId)
         keyPoints.value = data || []
-      } catch (err) {
+      } catch {
         keyPoints.value = []
-      } finally {
-        loadingKeyPoints.value = false
       }
     }
 
-    const fetchReviews = async () => {
+   const fetchReviews = async () => {
       loadingReviews.value = true
       try {
         const data = await api.getReviews(tourId)
         reviews.value = data || []
       } catch (err) {
+        console.error('Failed to load reviews:', err)
         reviews.value = []
       } finally {
         loadingReviews.value = false
@@ -287,7 +308,11 @@ export default {
     }
 
     const submitReview = async () => {
-      if (!reviewForm.value.rating) return alert('Please select a rating')
+      if (!reviewForm.value.rating) {
+        alert('Please select a rating')
+        return
+      }
+
       reviewLoading.value = true
 
       try {
@@ -304,9 +329,11 @@ export default {
         }
 
         await api.createReview(tourId, reviewData)
+        
         reviewForm.value = { rating: 0, comment: '', visitedAt: null }
         imagesText.value = ''
         showReviewForm.value = false
+        
         await fetchReviews()
       } catch (err) {
         alert(err.response?.data?.error || err.message || 'Failed to submit review')
@@ -329,14 +356,6 @@ export default {
       })
     }
 
-    const handleImageError = (event) => {
-      event.target.style.display = 'none'
-      const placeholder = event.target.nextElementSibling
-      if (placeholder && placeholder.classList.contains('keypoint-image-placeholder')) {
-        placeholder.style.display = 'flex'
-      }
-    }
-
     const formatDuration = (minutes) => {
       if (!minutes || minutes === 0) return ''
       const hours = Math.floor(minutes / 60)
@@ -346,32 +365,84 @@ export default {
       return `${hours}h ${mins}min`
     }
 
-    onMounted(async () => {
-      await fetchTour()
+    const fetchExecution = async () => {
+      try {
+        const data = await api.getActiveExecution(tourId)
+        if (data) execution.value = data
+      } catch {}
+    }
+
+    const startTour = async () => {
+      try {
+        const data = await api.startExecution(tourId)
+        execution.value = data
+      } catch (err) {
+        console.error(err)
+      }
+    }
+
+    const finishTour = async () => {
+      if (!execution.value) return
+      try {
+        await api.updateExecution(execution.value.id, { status: 'completed', completedPoints: execution.value.completedPoints })
+        execution.value.status = 'completed'
+      } catch (err) {
+        console.error(err)
+      }
+    }
+
+    const abandonTour = async () => {
+      if (!execution.value) return
+      try {
+        await api.updateExecution(execution.value.id, { status: 'abandoned', completedPoints: execution.value.completedPoints })
+        execution.value.status = 'abandoned'
+      } catch (err) {
+        console.error(err)
+      }
+    }
+
+    const onLocationUpdate = async ({ latitude, longitude }) => {
+      if (!execution.value) return
+      await api.addExecutionLocation(execution.value.id, { latitude, longitude })
+      // Check proximity to keypoints
+      for (const kp of keyPoints.value) {
+        if (!execution.value.completedPoints.includes(kp.id)) {
+          const dist = Math.hypot(latitude - kp.latitude, longitude - kp.longitude)
+          if (dist < 0.001) { // ~100m
+            await api.completeExecutionPoint(execution.value.id, { keyPointId: kp.id })
+            execution.value.completedPoints.push(kp.id)
+          }
+        }
+      }
+    }
+
+    onMounted(() => {
+      fetchTour()
       fetchKeyPoints()
       fetchReviews()
     })
 
-    return {
-      tour,
-      keyPoints,
-      reviews,
-      loading,
-      loadingKeyPoints,
-      loadingReviews,
-      error,
+
+    return { tour, 
+      keyPoints, 
+      reviews, execution, 
+      loading, error, 
+      startTour, 
+      finishTour, 
+      abandonTour, 
+      onLocationUpdate, 
+      isAuthor,
+      canAddReview,
       showReviewForm,
       reviewForm,
       reviewLoading,
       imagesText,
       today,
-      canAddReview,
       submitReview,
       cancelReview,
       formatDate,
-      formatDuration,
-      handleImageError
-    }
+      formatDuration
+     }
   }
 }
 </script>
@@ -431,14 +502,30 @@ export default {
   color: #f57c00;
 }
 
-.status-badge.purchased {
-  background: #f1d21f;
-  color: #826909;
+.status-badge.published {
+  background: #9bf3a7;
+  color: rgb(26, 211, 51);
 }
 
 .status-badge.archived {
   background: #eeeeee;
   color: #757575;
+}
+
+/* Execution status */
+.status-badge.active {
+  background-color: #cce5ff;
+  color: #004085;
+}
+
+.status-badge.completed {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.status-badge.abandoned {
+  background-color: #f8d7da;
+  color: #721c24;
 }
 
 .tour-header {
@@ -469,15 +556,6 @@ export default {
 .btn-action:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.btn-publish {
-  background: #af914c;
-  color: white;
-}
-
-.btn-publish:hover:not(:disabled) {
-  background: #dca931;
 }
 
 .btn-archive {
@@ -691,6 +769,9 @@ export default {
   gap: 1.5rem;
 }
 
+.keypoints-section {
+  margin-top: 3rem; 
+}
 .keypoint-card {
   border: 2px solid #e0e0e0;
   border-radius: 12px;
@@ -933,6 +1014,56 @@ export default {
     grid-template-columns: 1fr;
   }
 }
+
+.execution-status-box {
+  margin-top: 20px;
+  padding: 15px;
+  background: #f1f3f5;
+  border-radius: 8px;
+}
+/* Tour Action Buttons */
+.btn-action {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #42b983;
+  color: white;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #35a372;
+}
+
+.btn-secondary {
+  background: #667eea;
+  color: white;
+}
+.btn-secondary:hover:not(:disabled) {
+  background: #5568d3;
+}
+
+.btn-abandon {
+  background: #f44336;
+  color: white;
+}
+.btn-abandon:hover:not(:disabled) {
+  background: #d32f2f;
+}
+
+
 
 </style>
 
