@@ -327,9 +327,12 @@ func (r *TourRepository) CreateExecution(ctx context.Context, exec *model.TourEx
 	exec.StartedAt = time.Now().UTC()
 	exec.LastActivity = exec.StartedAt
 
-	// Ako CompletedPoints nije inicijalizovan, postavi prazan slice
 	if exec.CompletedPoints == nil {
 		exec.CompletedPoints = []model.CompletedPoint{}
+	}
+
+	if exec.Locations == nil {
+		exec.Locations = []model.Location{}
 	}
 
 	res, err := r.execCol.InsertOne(ctx, exec)
@@ -362,7 +365,6 @@ func (r *TourRepository) UpdateExecution(ctx context.Context, exec *model.TourEx
 		return mongo.ErrNilDocument
 	}
 
-	// Osiguraj da CompletedPoints nije nil
 	if exec.CompletedPoints == nil {
 		exec.CompletedPoints = []model.CompletedPoint{}
 	}
@@ -377,5 +379,32 @@ func (r *TourRepository) UpdateExecution(ctx context.Context, exec *model.TourEx
 	}
 
 	_, err := r.execCol.UpdateOne(ctx, bson.M{"_id": exec.ID}, update)
+	return err
+}
+
+func (r *TourRepository) AddLocation(ctx context.Context, execId primitive.ObjectID, loc model.Location) error {
+	if execId.IsZero() {
+		return mongo.ErrNilDocument
+	}
+
+	// If timestamp is missing, set now
+	if loc.Timestamp.IsZero() {
+		loc.Timestamp = time.Now().UTC()
+	}
+
+	filter := bson.M{"_id": execId}
+
+	update := bson.M{
+		"$push": bson.M{
+			"locations": loc,
+		},
+		"$set": bson.M{
+			"lastActivity": time.Now().UTC(),
+		},
+	}
+
+	opts := options.Update().SetUpsert(false)
+
+	_, err := r.execCol.UpdateOne(ctx, filter, update, opts)
 	return err
 }

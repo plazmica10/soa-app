@@ -23,9 +23,16 @@ type TourExecution struct {
 	Status          ExecutionStatus    `bson:"status" json:"status"`
 	LastActivity    time.Time          `bson:"lastActivity" json:"lastActivity"`
 	CompletedPoints []CompletedPoint   `bson:"completedPoints" json:"completedPoints"`
+	Locations       []Location         `bson:"locations,omitempty" json:"locations,omitempty"` // where is the tourist during the tour
 }
 
 type CompletedPoint struct {
 	KeyPointID primitive.ObjectID `bson:"keyPointId" json:"keyPointId"`
 	ReachedAt  time.Time          `bson:"reachedAt" json:"reachedAt"`
+}
+
+type Location struct {
+	Latitude  float64   `bson:"latitude" json:"latitude"`
+	Longitude float64   `bson:"longitude" json:"longitude"`
+	Timestamp time.Time `bson:"timestamp" json:"timestamp"`
 }

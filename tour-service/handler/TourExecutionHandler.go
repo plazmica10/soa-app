@@ -18,6 +18,7 @@ type tourExecRepo interface {
 	CreateExecution(ctx context.Context, exec *model.TourExecution) (*model.TourExecution, error)
 	GetActiveExecution(ctx context.Context, touristId string, tourId primitive.ObjectID) (*model.TourExecution, error)
 	UpdateExecution(ctx context.Context, exec *model.TourExecution) error
+	AddLocation(ctx context.Context, execId primitive.ObjectID, loc model.Location) error
 }
 
 func RegisterExecutionRoutes(authRouter *mux.Router, repo tourExecRepo) {
@@ -25,6 +26,7 @@ func RegisterExecutionRoutes(authRouter *mux.Router, repo tourExecRepo) {
 		authRouter.HandleFunc("/executions", createExecution(repo)).Methods("POST")
 		authRouter.HandleFunc("/executions/{tourId}/active", getActiveExecution(repo)).Methods("GET")
 		authRouter.HandleFunc("/executions/{execId}", updateExecution(repo)).Methods("PUT")
+		authRouter.HandleFunc("/executions/{execId}/location", addLocation(repo)).Methods("POST")
 	}
 }
 
@@ -142,7 +144,6 @@ func updateExecution(repo tourExecRepo) http.HandlerFunc {
 
 		status := model.ExecutionStatus(req.Status)
 
-		// Popunjavanje CompletedPoints
 		completedPoints := make([]model.CompletedPoint, 0, len(req.CompletedPoints))
 		now := time.Now().UTC()
 		for _, kpID := range req.CompletedPoints {
@@ -176,6 +177,57 @@ func updateExecution(repo tourExecRepo) http.HandlerFunc {
 		if err := repo.UpdateExecution(ctx, exec); err != nil {
 			log.Println("update execution error:", err)
 			http.Error(w, "failed to update execution", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+type addLocationRequest struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+func addLocation(repo tourExecRepo) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		a := auth.GetAuth(r)
+		if a == nil || a.UserID == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		vars := mux.Vars(r)
+		execId := vars["execId"]
+		if execId == "" {
+			http.Error(w, "execution ID required", http.StatusBadRequest)
+			return
+		}
+
+		objID, err := primitive.ObjectIDFromHex(execId)
+		if err != nil {
+			http.Error(w, "invalid execution ID", http.StatusBadRequest)
+			return
+		}
+
+		var req addLocationRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		loc := model.Location{
+			Latitude:  req.Latitude,
+			Longitude: req.Longitude,
+			Timestamp: time.Now().UTC(),
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		if err := repo.AddLocation(ctx, objID, loc); err != nil {
+			log.Println("add location error:", err)
+			http.Error(w, "failed to add location", http.StatusInternalServerError)
 			return
 		}
 
