@@ -104,11 +104,13 @@ services:
     environment:
       - MONGO_URI=mongodb://mongo:27017
       - MONGO_DB=tours
+      - GRPC_PORT=50053
       - JAEGER_AGENT_HOST=jaeger
       - JAEGER_AGENT_PORT=6831
       - OTEL_EXPORTER_JAEGER_ENDPOINT=http://jaeger:14268/api/traces
     ports:
       - "8083:8083"
+      - "50053:50053"
     restart: unless-stopped
     logging:
       driver: "json-file"

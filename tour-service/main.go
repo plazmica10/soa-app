@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,9 +11,11 @@ import (
 	"github.com/gorilla/mux"
 
 	"tour-service/auth"
+	tourgrpc "tour-service/grpc"
 	"tour-service/handler"
 	"tour-service/repository"
 
+	pb "github.com/IvanNovakovic/SOA_Proj/protos"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
@@ -21,6 +24,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
 var logger = logrus.New()
@@ -140,6 +145,44 @@ func main() {
 	handler.RegisterKeyPointRoutes(r, authSub, repo)
 	handler.RegisterReviewRoutes(r, authSub, repo)
 	handler.RegisterExecutionRoutes(authSub, repo)
+
+	// Start gRPC server
+	grpcPort := os.Getenv("GRPC_PORT")
+	if grpcPort == "" {
+		grpcPort = "50053"
+	}
+
+	go func() {
+		lis, err := net.Listen("tcp", ":"+grpcPort)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"service": "tour-service",
+				"action":  "grpc_listen",
+				"error":   err.Error(),
+			}).Fatal("Failed to listen for gRPC")
+		}
+
+		grpcServer := grpc.NewServer()
+		tourGRPCServer := tourgrpc.NewTourGRPCServer(repo)
+		pb.RegisterTourServiceServer(grpcServer, tourGRPCServer)
+
+		// Enable gRPC reflection for testing with grpcurl
+		reflection.Register(grpcServer)
+
+		logger.WithFields(logrus.Fields{
+			"service": "tour-service",
+			"action":  "grpc_start",
+			"port":    grpcPort,
+		}).Info("Tour service gRPC server started")
+
+		if err := grpcServer.Serve(lis); err != nil {
+			logger.WithFields(logrus.Fields{
+				"service": "tour-service",
+				"action":  "grpc_start",
+				"error":   err.Error(),
+			}).Fatal("Failed to start gRPC server")
+		}
+	}()
 
 	srv := &http.Server{
 		Handler:      r,

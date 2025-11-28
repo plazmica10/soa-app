@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+option go_package = "github.com/IvanNovakovic/SOA_Proj/protos";
+
+package tour;
+
+// Request for getting tour by ID
+message GetTourByIDRequest {
+  string tour_id = 1;
+}
+
+// Request for getting tours by author
+message GetToursByAuthorRequest {
+  string author_id = 1;
+}
+
+// Transport duration information
+message TransportDuration {
+  int32 walking = 1; // minutes
+  int32 biking = 2;  // minutes
+  int32 driving = 3; // minutes
+}
+
+// Tour information
+message Tour {
+  string id = 1;
+  string author_id = 2;
+  string name = 3;
+  string description = 4;
+  string difficulty = 5;
+  repeated string tags = 6;
+  string status = 7;
+  double price = 8;
+  double distance = 9; // kilometers
+  TransportDuration durations = 10;
+  string published_at = 11;
+  string archived_at = 12;
+  string created_at = 13;
+}
+
+// Response for getting tour by ID
+message GetTourByIDResponse {
+  Tour tour = 1;
+}
+
+// Response for getting tours by author
+message GetToursByAuthorResponse {
+  repeated Tour tours = 1;
+}
+
+// Tour service
+service TourService {
+  // Get tour by ID
+  rpc GetTourByID(GetTourByIDRequest) returns (GetTourByIDResponse);
+  
+  // Get tours by author
+  rpc GetToursByAuthor(GetToursByAuthorRequest) returns (GetToursByAuthorResponse);
+}

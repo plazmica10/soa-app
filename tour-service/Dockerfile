@@ -2,6 +2,9 @@
 FROM golang:1.22-alpine AS builder
 WORKDIR /src
 
+# Copy protos directory to parent directory structure
+COPY protos/ /protos/
+
 # Copy module files first to leverage cache
 COPY tour-service/go.mod tour-service/go.sum ./
 RUN go mod download
@@ -14,5 +17,5 @@ FROM alpine:3.18 AS runtime
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /out/tour-service /usr/local/bin/tour-service
 
-EXPOSE 8083
+EXPOSE 8083 50053
 ENTRYPOINT ["/usr/local/bin/tour-service"]

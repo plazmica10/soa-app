@@ -116,6 +116,8 @@ type grpcClients struct {
 	stakeholderClient pb.StakeholderServiceClient
 	followerConn      *grpc.ClientConn
 	followerClient    pb.FollowerServiceClient
+	tourConn          *grpc.ClientConn
+	tourClient        pb.TourServiceClient
 }
 
 func initGRPCClients() (*grpcClients, error) {
@@ -155,6 +157,23 @@ func initGRPCClients() (*grpcClients, error) {
 		return nil, err
 	}
 
+	// Connect to tour service with OpenTelemetry interceptors
+	tourConn, err := grpc.Dial("tour-service:50053",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor()),
+		grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor()))
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"service": "gateway-service",
+			"action":  "grpc_client_init",
+			"target":  "tour-service",
+			"error":   err.Error(),
+		}).Error("Failed to connect to tour service")
+		stakeholderConn.Close()
+		followerConn.Close()
+		return nil, err
+	}
+
 	logger.WithFields(logrus.Fields{
 		"service": "gateway-service",
 		"action":  "grpc_client_init",
@@ -165,6 +184,8 @@ func initGRPCClients() (*grpcClients, error) {
 		stakeholderClient: pb.NewStakeholderServiceClient(stakeholderConn),
 		followerConn:      followerConn,
 		followerClient:    pb.NewFollowerServiceClient(followerConn),
+		tourConn:          tourConn,
+		tourClient:        pb.NewTourServiceClient(tourConn),
 	}, nil
 }
 
@@ -174,6 +195,9 @@ func (gc *grpcClients) Close() {
 	}
 	if gc.followerConn != nil {
 		gc.followerConn.Close()
+	}
+	if gc.tourConn != nil {
+		gc.tourConn.Close()
 	}
 }
 
@@ -305,6 +329,84 @@ func main() {
 		json.NewEncoder(w).Encode(result)
 	}
 
+	// gRPC handler for get tour by ID
+	handleGetTourByID := func(w http.ResponseWriter, r *http.Request, client pb.TourServiceClient) {
+		if r.Method != "GET" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Extract tour ID from path /tours/{id}
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) < 2 {
+			http.Error(w, "tour id required", http.StatusBadRequest)
+			return
+		}
+		tourID := parts[1]
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		resp, err := client.GetTourByID(ctx, &pb.GetTourByIDRequest{
+			TourId: tourID,
+		})
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"service": "gateway-service",
+				"action":  "grpc_get_tour_by_id",
+				"tour_id": tourID,
+				"error":   err.Error(),
+			}).Error("gRPC get tour by ID error")
+
+			st, ok := status.FromError(err)
+			if ok && st.Code() == codes.NotFound {
+				http.Error(w, "tour not found", http.StatusNotFound)
+			} else {
+				http.Error(w, "failed to get tour", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp.Tour)
+	}
+
+	// gRPC handler for get tours by author
+	handleGetToursByAuthor := func(w http.ResponseWriter, r *http.Request, client pb.TourServiceClient) {
+		if r.Method != "GET" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Extract author ID from path /tours/author/{authorId}
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) < 3 {
+			http.Error(w, "author id required", http.StatusBadRequest)
+			return
+		}
+		authorID := parts[2]
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		resp, err := client.GetToursByAuthor(ctx, &pb.GetToursByAuthorRequest{
+			AuthorId: authorID,
+		})
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"service":   "gateway-service",
+				"action":    "grpc_get_tours_by_author",
+				"author_id": authorID,
+				"error":     err.Error(),
+			}).Error("gRPC get tours by author error")
+			http.Error(w, "failed to get tours", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp.Tours)
+	}
+
 	// gRPC handler for get followers
 	handleGetFollowers := func(w http.ResponseWriter, r *http.Request, client pb.FollowerServiceClient) {
 		if r.Method != "GET" {
@@ -365,6 +467,16 @@ func main() {
 
 		if strings.HasPrefix(path, "/followers/") {
 			handleGetFollowers(w, r, grpcClients.followerClient)
+			return
+		}
+
+		if strings.HasPrefix(path, "/tours/") && strings.Contains(path, "/author/") {
+			handleGetToursByAuthor(w, r, grpcClients.tourClient)
+			return
+		}
+
+		if strings.HasPrefix(path, "/tours/") && len(strings.Split(strings.Trim(path, "/"), "/")) == 2 {
+			handleGetTourByID(w, r, grpcClients.tourClient)
 			return
 		}
 
